@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Central Square — Red Line Tracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --red: #DA291C;
+    --red-dim: #8B1A12;
+    --red-glow: rgba(218, 41, 28, 0.25);
+    --bg: #0A0A0A;
+    --surface: #111111;
+    --surface2: #1A1A1A;
+    --border: #222222;
+    --text: #F0EDE8;
+    --text-dim: #888880;
+    --text-muted: #444440;
+    --green: #22C55E;
+    --amber: #F59E0B;
+    --mono: 'Space Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 24px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    background: rgba(10,10,10,0.95);
+    backdrop-filter: blur(12px);
+    z-index: 100;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .line-badge {
+    width: 48px;
+    height: 48px;
+    background: var(--red);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 14px;
+    color: white;
+    box-shadow: 0 0 24px var(--red-glow), 0 0 48px rgba(218,41,28,0.1);
+    flex-shrink: 0;
+    animation: pulse-badge 3s ease-in-out infinite;
+  }
+
+  @keyframes pulse-badge {
+    0%, 100% { box-shadow: 0 0 24px var(--red-glow), 0 0 48px rgba(218,41,28,0.1); }
+    50% { box-shadow: 0 0 32px rgba(218,41,28,0.5), 0 0 64px rgba(218,41,28,0.2); }
+  }
+
+  .station-name {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .station-name h1 {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: var(--text);
+  }
+
+  .station-name span {
+    font-size: 12px;
+    color: var(--text-dim);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .live-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--green);
+    letter-spacing: 0.1em;
+  }
+
+  .live-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: blink 1.4s ease-in-out infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.2; }
+  }
+
+  .refresh-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 8px 14px;
+    cursor: pointer;
+    letter-spacing: 0.05em;
+    transition: all 0.2s;
+    border-radius: 4px;
+  }
+
+  .refresh-btn:hover {
+    border-color: var(--red);
+    color: var(--red);
+  }
+
+  .refresh-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .refresh-btn.spinning svg {
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+  }
+
+  /* Alerts */
+  #alerts-section {
+    margin-bottom: 32px;
+  }
+
+  .section-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .alert-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--amber);
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    border-radius: 2px;
+    animation: slideIn 0.3s ease;
+  }
+
+  .alert-card.severity-1 { border-left-color: var(--red); }
+  .alert-card.severity-2 { border-left-color: var(--amber); }
+  .alert-card.severity-3 { border-left-color: #60A5FA; }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .alert-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+
+  .alert-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    line-height: 1.4;
+  }
+
+  .alert-badge {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    padding: 3px 8px;
+    border-radius: 2px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .alert-badge.effect-DELAY { background: rgba(218,41,28,0.15); color: var(--red); border: 1px solid rgba(218,41,28,0.3); }
+  .alert-badge.effect-SUSPENSION { background: rgba(218,41,28,0.2); color: #FF6B6B; border: 1px solid rgba(218,41,28,0.4); }
+  .alert-badge.effect-SERVICE_CHANGE { background: rgba(245,158,11,0.15); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
+  .alert-badge.effect-SHUTTLE { background: rgba(245,158,11,0.15); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
+  .alert-badge.effect-OTHER { background: rgba(96,165,250,0.15); color: #60A5FA; border: 1px solid rgba(96,165,250,0.3); }
+
+  .alert-body {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  .no-alerts {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--green);
+    padding: 14px 18px;
+    background: rgba(34,197,94,0.05);
+    border: 1px solid rgba(34,197,94,0.15);
+    border-radius: 2px;
+  }
+
+  /* Arrivals grid */
+  .arrivals-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  @media (max-width: 640px) {
+    .arrivals-grid { grid-template-columns: 1fr; }
+    header { padding: 16px; }
+    main { padding: 20px 16px 48px; }
+  }
+
+  .direction-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .direction-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface2);
+  }
+
+  .direction-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+
+  .direction-terminus {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  .direction-arrow {
+    color: var(--red);
+    font-size: 18px;
+    opacity: 0.7;
+  }
+
+  .train-list {
+    padding: 8px 0;
+  }
+
+  .train-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid rgba(34,34,34,0.7);
+    transition: background 0.15s;
+    animation: fadeRow 0.4s ease both;
+  }
+
+  .train-row:last-child { border-bottom: none; }
+  .train-row:hover { background: rgba(255,255,255,0.02); }
+
+  @keyframes fadeRow {
+    from { opacity: 0; transform: translateX(-6px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  .train-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .train-index {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    width: 16px;
+  }
+
+  .train-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .dot-arriving { background: var(--red); animation: pulse-dot 1s ease-in-out infinite; }
+  .dot-approaching { background: var(--amber); }
+  .dot-en-route { background: var(--text-muted); }
+
+  @keyframes pulse-dot {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.4); opacity: 0.7; }
+  }
+
+  .train-destination {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .train-car-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .train-time {
+    text-align: right;
+  }
+
+  .time-value {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -1px;
+  }
+
+  .time-value.arriving { color: var(--red); }
+  .time-value.soon { color: var(--amber); }
+  .time-value.normal { color: var(--text); }
+
+  .time-unit {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+    margin-top: 2px;
+  }
+
+  .no-trains {
+    padding: 32px 20px;
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+  }
+
+  /* Skeleton loader */
+  .skeleton {
+    background: linear-gradient(90deg, var(--surface2) 25%, var(--border) 50%, var(--surface2) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 2px;
+    height: 12px;
+  }
+
+  @keyframes shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -200% 0; }
+  }
+
+  .skeleton-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(34,34,34,0.7);
+  }
+
+  .last-updated {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-align: center;
+    margin-top: 24px;
+  }
+
+  .error-msg {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--red);
+    padding: 16px 20px;
+    border: 1px solid rgba(218,41,28,0.2);
+    background: rgba(218,41,28,0.05);
+    border-radius: 2px;
+  }
+
+
+
+  /* ── Green Line route badges ──────────────────────────── */
+  .route-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+    color: #fff;
+  }
+  .route-badge.gl-b { background: #00843D; }
+  .route-badge.gl-c { background: #00843D; }
+  .route-badge.gl-d { background: #00843D; }
+  .route-badge.gl-e { background: #00843D; }
+  .route-badge.gl   { background: #00843D; }
+
+  .green-section-header {
+    padding: 14px 20px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .green-section-header-title {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+  .green-section-header-sub {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  /* ── Electron frameless titlebar ──────────────────────── */
+  body { padding-top: 36px; }   /* make room for titlebar */
+
+  #titlebar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 36px;
+    background: #0A0A0A;
+    border-bottom: 1px solid #1e1e1e;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px 0 14px;
+    z-index: 9999;
+    -webkit-app-region: drag;   /* draggable zone */
+    user-select: none;
+  }
+
+  #titlebar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: #555;
+    text-transform: uppercase;
+  }
+
+  #titlebar-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #DA291C;
+    box-shadow: 0 0 6px rgba(218,41,28,0.6);
+    animation: pulse-badge 3s ease-in-out infinite;
+  }
+
+  #titlebar-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    -webkit-app-region: no-drag;  /* buttons must be clickable */
+  }
+
+  .tb-btn {
+    width: 26px; height: 26px;
+    border-radius: 4px;
+    border: none;
+    background: transparent;
+    color: #555;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s, color 0.15s;
+    font-size: 13px;
+    line-height: 1;
+  }
+  .tb-btn:hover          { background: #1e1e1e; color: #ccc; }
+  .tb-btn.top-active     { color: #DA291C; }
+  .tb-btn#tb-close:hover { background: #DA291C; color: #fff; }
+
+</style>
+</head>
+<body>
+
+
+<div id="titlebar">
+  <div id="titlebar-left">
+    <div id="titlebar-dot"></div>
+    Central Square · Red Line
+  </div>
+  <div id="titlebar-controls">
+    <button class="tb-btn" id="tb-top"     title="Always on top">⬡</button>
+    <button class="tb-btn" id="tb-min"     title="Minimise">─</button>
+    <button class="tb-btn" id="tb-close"   title="Close">✕</button>
+  </div>
+</div>
+
+<header>
+  <div class="header-left">
+    <div class="line-badge">RL</div>
+    <div class="station-name">
+      <h1>Central Square</h1>
+      <span>Red Line · Cambridge, MA</span>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="live-indicator">
+      <div class="live-dot"></div>
+      LIVE
+    </div>
+    <button class="refresh-btn" id="refreshBtn" onclick="fetchAll()">
+      <svg id="refreshIcon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="display:inline;vertical-align:middle;margin-right:5px">
+        <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/>
+      </svg>
+      REFRESH
+    </button>
+  </div>
+</header>
+
+<main>
+  <!-- Alerts -->
+  <section id="alerts-section">
+    <div class="section-label">Service Alerts</div>
+    <div id="alerts-container">
+      <div class="skeleton-row"><div class="skeleton" style="width:70%"></div><div class="skeleton" style="width:15%"></div></div>
+    </div>
+  </section>
+
+  <!-- Arrivals -->
+  <div class="section-label">Central Square — Red Line</div>
+  <div class="arrivals-grid">
+    <!-- Southbound / Braintree/Ashmont -->
+    <div class="direction-panel">
+      <div class="direction-header">
+        <div>
+          <div class="direction-name">Southbound</div>
+          <div class="direction-terminus">toward Braintree / Ashmont</div>
+        </div>
+        <div class="direction-arrow">↓</div>
+      </div>
+      <div class="train-list" id="south-list">
+        <div class="skeleton-row"><div class="skeleton" style="width:55%"></div><div class="skeleton" style="width:20%"></div></div>
+        <div class="skeleton-row"><div class="skeleton" style="width:45%"></div><div class="skeleton" style="width:20%"></div></div>
+        <div class="skeleton-row"><div class="skeleton" style="width:50%"></div><div class="skeleton" style="width:20%"></div></div>
+      </div>
+    </div>
+
+    <!-- Northbound / Alewife -->
+    <div class="direction-panel">
+      <div class="direction-header">
+        <div>
+          <div class="direction-name">Northbound</div>
+          <div class="direction-terminus">toward Alewife</div>
+        </div>
+        <div class="direction-arrow">↑</div>
+      </div>
+      <div class="train-list" id="north-list">
+        <div class="skeleton-row"><div class="skeleton" style="width:55%"></div><div class="skeleton" style="width:20%"></div></div>
+        <div class="skeleton-row"><div class="skeleton" style="width:45%"></div><div class="skeleton" style="width:20%"></div></div>
+        <div class="skeleton-row"><div class="skeleton" style="width:50%"></div><div class="skeleton" style="width:20%"></div></div>
+      </div>
+    </div>
+  </div>
+
+
+    </div>
+
+  <!-- Park Street Green Line -->
+  <div class="section-label" style="margin-top:32px">Park Street — Green Line</div>
+  <div class="arrivals-grid">
+    <div class="direction-panel">
+      <div class="green-section-header">
+        <div>
+          <div class="green-section-header-title">Outbound</div>
+          <div class="green-section-header-sub">toward B / C / D / E branches</div>
+        </div>
+        <div class="direction-arrow" style="color:#00843D">→</div>
+      </div>
+      <div class="train-list" id="green-outbound">
+        <div class="skeleton-row"><div class="skeleton" style="width:55%"></div><div class="skeleton" style="width:20%"></div></div>
+        <div class="skeleton-row"><div class="skeleton" style="width:45%"></div><div class="skeleton" style="width:20%"></div></div>
+        <div class="skeleton-row"><div class="skeleton" style="width:50%"></div><div class="skeleton" style="width:20%"></div></div>
+      </div>
+    </div>
+    <div class="direction-panel">
+      <div class="green-section-header">
+        <div>
+          <div class="green-section-header-title">Inbound</div>
+          <div class="green-section-header-sub">toward Government Center / North Station</div>
+        </div>
+        <div class="direction-arrow" style="color:#00843D">←</div>
+      </div>
+      <div class="train-list" id="green-inbound">
+        <div class="skeleton-row"><div class="skeleton" style="width:55%"></div><div class="skeleton" style="width:20%"></div></div>
+        <div class="skeleton-row"><div class="skeleton" style="width:45%"></div><div class="skeleton" style="width:20%"></div></div>
+        <div class="skeleton-row"><div class="skeleton" style="width:50%"></div><div class="skeleton" style="width:20%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="last-updated" id="last-updated"></div>
+</main>
+
+<script>
+  const STOP_ID = 'place-cntsq';
+  const PARK_STOP_ID = 'place-pktrm';
+  const BASE = 'https://api-v3.mbta.com';
+  // Optional: paste a free MBTA API key here (1000 req/min vs 20 unauthenticated).
+  // Get one at https://api-v3.mbta.com/
+  const API_KEY = '';
+
+  function apiUrl(path, params) {
+    const q = Object.entries(params)
+      .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v))
+      .join('&');
+    return BASE + path + '?' + q + (API_KEY ? '&api_key=' + API_KEY : '');
+  }
+
+  function formatMinutes(isoTime) {
+    if (!isoTime) return null;
+    const arrival = new Date(isoTime);
+    const now = new Date();
+    const diffMs = arrival - now;
+    const diffMin = Math.round(diffMs / 60000);
+    return diffMin;
+  }
+
+  function timeDisplay(minutes) {
+    if (minutes === null || minutes === undefined) return { label: '--', cls: 'normal' };
+    if (minutes <= 0) return { label: 'BRD', cls: 'arriving' };
+    if (minutes === 1) return { label: '1', cls: 'arriving' };
+    if (minutes <= 3) return { label: String(minutes), cls: 'soon' };
+    return { label: String(minutes), cls: 'normal' };
+  }
+
+  function statusDotClass(minutes) {
+    if (minutes === null || minutes <= 1) return 'dot-arriving';
+    if (minutes <= 4) return 'dot-approaching';
+    return 'dot-en-route';
+  }
+
+  async function fetchPredictions() {
+    const url = apiUrl('/predictions', {'filter[stop]': STOP_ID, 'filter[route]': 'Red', 'sort': 'arrival_time', 'include': 'trip,vehicle,schedule'});
+    const res = await fetch(url, { mode: 'cors', cache: 'no-store' });
+    if (!res.ok) throw new Error(`Predictions ${res.status}: ${await res.text().then(t=>t.slice(0,120))}`);
+    return res.json();
+  }
+
+  async function fetchAlerts() {
+    // Fetch alerts for both Central Square (Red) and Park Street (Red + Green)
+    const url = apiUrl('/alerts', {'filter[stop]': STOP_ID + ',' + PARK_STOP_ID, 'filter[route]': 'Red,Green-B,Green-C,Green-D,Green-E', 'filter[activity]': 'BOARD,EXIT,RIDE'});
+    const res = await fetch(url, { mode: 'cors', cache: 'no-store' });
+    if (!res.ok) throw new Error(`Alerts ${res.status}: ${await res.text().then(t=>t.slice(0,120))}`);
+    return res.json();
+  }
+
+  function renderPredictions(data) {
+    // Build trip + schedule map
+    const trips = {}, schedules = {};
+    (data.included || []).forEach(inc => {
+      if (inc.type === 'trip')     trips[inc.id]     = inc;
+      if (inc.type === 'schedule') schedules[inc.id] = inc;
+    });
+
+    // direction_id: 0 = Southbound (Braintree/Ashmont), 1 = Northbound (Alewife)
+    const south = [], north = [];
+
+    (data.data || []).forEach(pred => {
+      const arrival = pred.attributes.arrival_time || pred.attributes.departure_time;
+      const minutes = formatMinutes(arrival);
+      if (minutes === null || minutes < 0) return; // skip already-departed
+      const tripId = pred.relationships?.trip?.data?.id;
+      const trip = trips[tripId] || {};
+      const headsign = trip.attributes?.headsign || pred.attributes.headsign || '—';
+      const direction = pred.attributes.direction_id;
+      const schedId  = pred.relationships?.schedule?.data?.id;
+      const entry = { minutes, headsign, arrival, schedId, tripId };
+      if (direction === 0) south.push(entry);
+      else north.push(entry);
+    });
+
+    // Attach scheduled arrival time to each entry for delay logging
+    const attachSched = arr => arr.map(e => ({
+      ...e,
+      scheduledArrival: schedules[e.schedId]?.attributes?.arrival_time
+                     || schedules[e.schedId]?.attributes?.departure_time
+                     || null
+    }));
+
+    const southFull = attachSched(south);
+    const northFull = attachSched(north);
+
+    renderDirection('south-list', southFull.slice(0, 5));
+    renderDirection('north-list', northFull.slice(0, 5));
+
+    // Log delay for trains currently arriving/boarding (minutes <= 0)
+    const arrivingRed = [...southFull, ...northFull].filter(t => t.minutes <= 0 && t.scheduledArrival);
+    if (arrivingRed.length) logDelays('red', arrivingRed);
+  }
+
+  function renderDirection(containerId, trains) {
+    const el = document.getElementById(containerId);
+    if (!trains.length) {
+      el.innerHTML = '<div class="no-trains">NO PREDICTIONS AVAILABLE</div>';
+      return;
+    }
+
+    el.innerHTML = trains.map((t, i) => {
+      const { label, cls } = timeDisplay(t.minutes);
+      const dotCls = statusDotClass(t.minutes);
+      const isBoarding = t.minutes <= 0;
+      const unit = isBoarding ? 'boarding' : t.minutes === 1 ? 'min' : 'min';
+      return `
+        <div class="train-row" style="animation-delay:${i * 60}ms">
+          <div class="train-info">
+            <span class="train-index">${i + 1}</span>
+            <span class="train-status-dot ${dotCls}"></span>
+            <div>
+              <div class="train-destination">${escHtml(t.headsign)}</div>
+            </div>
+          </div>
+          <div class="train-time">
+            <div class="time-value ${cls}">${label}</div>
+            <div class="time-unit">${isBoarding ? 'boarding' : 'min'}</div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  function renderAlerts(data) {
+    const container = document.getElementById('alerts-container');
+    const alerts = (data.data || []).filter(a => {
+      // Filter to only active alerts
+      const now = new Date();
+      const periods = a.attributes.active_period || [];
+      if (!periods.length) return true;
+      return periods.some(p => {
+        const start = p.start ? new Date(p.start) : null;
+        const end = p.end ? new Date(p.end) : null;
+        const started = !start || start <= now;
+        const notEnded = !end || end >= now;
+        return started && notEnded;
+      });
+    });
+
+    if (!alerts.length) {
+      container.innerHTML = `
+        <div class="no-alerts">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          NO ACTIVE ALERTS — SERVICE OPERATING NORMALLY
+        </div>`;
+      return;
+    }
+
+    const effectLabels = {
+      DELAY: 'DELAY',
+      SUSPENSION: 'SUSPENDED',
+      SERVICE_CHANGE: 'SVC CHANGE',
+      SHUTTLE: 'SHUTTLE',
+      STOP_CLOSURE: 'STOP CLOSED',
+      DETOUR: 'DETOUR',
+      ADDITIONAL_SERVICE: 'ADDED SVC',
+      MODIFIED_SERVICE: 'MOD SVC',
+      OTHER_EFFECT: 'NOTICE',
+      UNKNOWN_EFFECT: 'NOTICE',
+      NO_SERVICE: 'NO SERVICE',
+      REDUCED_SERVICE: 'REDUCED',
+    };
+
+    container.innerHTML = alerts.slice(0, 5).map((a, i) => {
+      const eff = a.attributes.effect || 'OTHER';
+      const severity = a.attributes.severity >= 7 ? 1 : a.attributes.severity >= 4 ? 2 : 3;
+      const effClass = ['DELAY','SUSPENSION','NO_SERVICE','STOP_CLOSURE'].includes(eff) ? 'effect-' + eff : 
+                       ['SERVICE_CHANGE','SHUTTLE','MODIFIED_SERVICE','REDUCED_SERVICE'].includes(eff) ? 'effect-SERVICE_CHANGE' : 'effect-OTHER';
+      const label = effectLabels[eff] || 'NOTICE';
+      const header = a.attributes.short_header || a.attributes.header || '';
+      const body = a.attributes.description || '';
+      return `
+        <div class="alert-card severity-${severity}" style="animation-delay:${i * 80}ms">
+          <div class="alert-header">
+            <div class="alert-title">${escHtml(header)}</div>
+            <span class="alert-badge ${effClass}">${label}</span>
+          </div>
+          ${body ? `<div class="alert-body">${escHtml(body.slice(0, 220))}${body.length > 220 ? '…' : ''}</div>` : ''}
+        </div>`;
+    }).join('');
+  }
+
+
+    async function fetchGreenLine() {
+    const url = apiUrl('/predictions', {
+      'filter[stop]': PARK_STOP_ID,
+      'filter[route]': 'Green-B,Green-C,Green-D,Green-E',
+      'sort': 'arrival_time',
+      'include': 'trip,route,schedule'
+    });
+    const res = await fetch(url, { mode: 'cors', cache: 'no-store' });
+    if (!res.ok) throw new Error(`Green Line ${res.status}: ${await res.text().then(t=>t.slice(0,120))}`);
+    return res.json();
+  }
+
+  // Route colour map for Green Line branches
+  const GL_BRANCH = {
+    'Green-B': { letter: 'B', cls: 'gl-b' },
+    'Green-C': { letter: 'C', cls: 'gl-c' },
+    'Green-D': { letter: 'D', cls: 'gl-d' },
+    'Green-E': { letter: 'E', cls: 'gl-e' },
+  };
+
+  function renderGreenLine(data) {
+    const trips = {}, routes = {}, schedules = {};
+    (data.included || []).forEach(inc => {
+      if (inc.type === 'trip')     trips[inc.id]     = inc;
+      if (inc.type === 'route')    routes[inc.id]    = inc;
+      if (inc.type === 'schedule') schedules[inc.id] = inc;
+    });
+
+    // direction_id: 0 = Outbound (away from downtown), 1 = Inbound (toward downtown)
+    const outbound = [], inbound = [];
+
+    (data.data || []).forEach(pred => {
+      const arrival = pred.attributes.arrival_time || pred.attributes.departure_time;
+      const minutes = formatMinutes(arrival);
+      if (minutes === null || minutes < 0) return;
+
+      const tripId  = pred.relationships?.trip?.data?.id;
+      const routeId = pred.relationships?.route?.data?.id;
+      const trip    = trips[tripId]  || {};
+      const headsign = trip.attributes?.headsign || pred.attributes.headsign || '—';
+      const branch   = GL_BRANCH[routeId] || { letter: '?', cls: 'gl' };
+      const direction = pred.attributes.direction_id;
+
+      const schedId  = pred.relationships?.schedule?.data?.id;
+      const entry = { minutes, headsign, branch, arrival, schedId, tripId, routeId };
+      if (direction === 0) outbound.push(entry);
+      else inbound.push(entry);
+    });
+
+    const attachSchedGL = arr => arr.map(e => ({
+      ...e,
+      scheduledArrival: schedules[e.schedId]?.attributes?.arrival_time
+                     || schedules[e.schedId]?.attributes?.departure_time
+                     || null
+    }));
+
+    const outFull = attachSchedGL(outbound);
+    const inFull  = attachSchedGL(inbound);
+
+    renderGreenDirection('green-outbound', outFull.slice(0, 6));
+    renderGreenDirection('green-inbound',  inFull.slice(0, 6));
+
+    // Log delay for trains currently arriving/boarding
+    const arrivingGL = [...outFull, ...inFull].filter(t => t.minutes <= 0 && t.scheduledArrival);
+    if (arrivingGL.length) logDelays('green', arrivingGL);
+  }
+
+  function renderGreenDirection(containerId, trains) {
+    const el = document.getElementById(containerId);
+    if (!trains.length) {
+      el.innerHTML = '<div class="no-trains">NO PREDICTIONS AVAILABLE</div>';
+      return;
+    }
+    el.innerHTML = trains.map((t, i) => {
+      const { label, cls } = timeDisplay(t.minutes);
+      const dotCls = statusDotClass(t.minutes);
+      const isBoarding = t.minutes <= 0;
+      return `
+        <div class="train-row" style="animation-delay:${i * 60}ms">
+          <div class="train-info">
+            <span class="train-index">${i + 1}</span>
+            <span class="route-badge ${t.branch.cls}">${t.branch.letter}</span>
+            <div>
+              <div class="train-destination">${escHtml(t.headsign)}</div>
+            </div>
+          </div>
+          <div class="train-time">
+            <div class="time-value ${cls}">${label}</div>
+            <div class="time-unit">${isBoarding ? 'boarding' : 'min'}</div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function setRefreshing(state) {
+    const btn = document.getElementById('refreshBtn');
+    btn.disabled = state;
+    btn.classList.toggle('spinning', state);
+  }
+
+
+  // ── Delay logging ────────────────────────────────────────────────────────────
+  // Dedup key = date + tripId  →  same trip on a different day is logged again,
+  // duplicate within the same day is suppressed.
+  // The in-memory Set is a fast first-pass guard; main.js re-checks against the
+  // CSV so duplicates are blocked even if the app restarts mid-day.
+  const seenTrips = new Set();
+
+  function logDelays(line, arrivingTrains) {
+    if (!window.electronAPI?.logDelay) return; // no-op in plain browser
+
+    const now  = new Date();
+    const date = now.toLocaleDateString('en-US'); // e.g. "3/24/2026"
+
+    arrivingTrains.forEach(t => {
+      const dedupKey = `${date}:${t.tripId}`;
+      if (seenTrips.has(dedupKey)) return;
+      seenTrips.add(dedupKey);
+
+      const scheduledDate = new Date(t.scheduledArrival);
+      const delayMin = Math.round((now - scheduledDate) / 60000);
+      const isEarly  = delayMin < 0;
+
+      window.electronAPI.logDelay({
+        line,
+        tripId:    t.tripId,
+        date,
+        time:      now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        headsign:  t.headsign,
+        scheduled: scheduledDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        actual:    now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }),
+        delayMin,
+        isEarly,
+      });
+    });
+  }
+
+  async function fetchAll() {
+    setRefreshing(true);
+
+    // Fetch predictions and alerts independently so one failure doesn't affect the other
+    const [predictionsResult, alertsResult, greenLineResult] = await Promise.allSettled([
+      fetchPredictions(),
+      fetchAlerts(),
+      fetchGreenLine()
+    ]);
+
+    if (predictionsResult.status === 'fulfilled') {
+      renderPredictions(predictionsResult.value);
+    } else {
+      const msg = escHtml(predictionsResult.reason?.message || 'Unknown error');
+      const errHtml = `<div class="error-msg">⚠ ${msg}</div>`;
+      document.getElementById('south-list').innerHTML = errHtml;
+      document.getElementById('north-list').innerHTML = errHtml;
+      console.error('Predictions fetch failed:', predictionsResult.reason);
+    }
+
+    if (alertsResult.status === 'fulfilled') {
+      renderAlerts(alertsResult.value);
+    } else {
+      // On any alerts fetch failure, fall back to the "no alerts" state rather than an error
+      console.error('Alerts fetch failed:', alertsResult.reason);
+      renderAlerts({ data: [] });
+    }
+
+    if (greenLineResult.status === 'fulfilled') {
+      renderGreenLine(greenLineResult.value);
+    } else {
+      console.error('Green Line fetch failed:', greenLineResult.reason);
+      const glErr = '<div class="no-trains">NO PREDICTIONS AVAILABLE</div>';
+      document.getElementById('green-outbound').innerHTML = glErr;
+      document.getElementById('green-inbound').innerHTML  = glErr;
+    }
+
+    const now = new Date();
+    document.getElementById('last-updated').textContent =
+      `LAST UPDATED ${now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+
+    setRefreshing(false);
+  }
+
+  // Initial load + auto-refresh every 30s
+  fetchAll();
+  setInterval(fetchAll, 120000);
+
+  // ── Electron window controls (no-op in plain browser) ────────────────
+  if (window.electronAPI) {
+    document.getElementById('tb-min').addEventListener('click', () => window.electronAPI.minimize());
+    document.getElementById('tb-close').addEventListener('click', () => window.electronAPI.close());
+
+    const topBtn = document.getElementById('tb-top');
+    topBtn.addEventListener('click', () => window.electronAPI.toggleTop());
+    window.electronAPI.onTopState(val => topBtn.classList.toggle('top-active', val));
+  } else {
+    // Running in a normal browser — hide the custom titlebar buttons gracefully
+    document.getElementById('titlebar').style.display = 'none';
+    document.body.style.paddingTop = '0';
+  }
+
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+{
+  "name": "mbta-central-square",
+  "version": "1.0.0",
+  "description": "Central Square Red Line live departure board",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.mbta.centralsquare",
+    "productName": "Central Square",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "portable",
+      "icon": "icon.ico"
+    },
+    "portable": {
+      "artifactName": "CentralSquare-MBTA.exe"
+    },
+    "files": [
+      "main.js",
+      "index.html",
+      "icon.ico"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.9.1"
+  }
+}
