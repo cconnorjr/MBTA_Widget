@@ -143,11 +143,80 @@ function getLoggedTripIds(cells) {
   return ids;
 }
 
+// ── MTA GTFS-RT feed (72 St-2 Av, Q line) ───────────────────────────────────
+//
+// Stop IDs for 72 St-2 Av (Second Avenue Subway):
+//   Q05N = Northbound platform (toward 96 St / Astoria-Ditmars Blvd)
+//   Q05S = Southbound platform (toward Coney Island-Stillwell Av)
+//
+// Verify stop IDs in MTA GTFS Static stops.txt:
+//   https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/google_transit%2Fsubway
+//
+// No API key required — the NQRW feed is publicly accessible.
+// If the MTA restricts access in the future, register free at https://api.mta.info/
+//
+const MTA_FEED_URL = 'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-nqrw';
+const MTA_Q72_STOPS = new Set(['Q05N', 'Q05S']);
+
+const GtfsRt = require('gtfs-realtime-bindings');
+
+ipcMain.handle('fetch-mta-predictions', async (_event, apiKey) => {
+  const FeedMessage = GtfsRt.transit_realtime.FeedMessage;
+
+  const headers = { 'Cache-Control': 'no-store' };
+  if (apiKey) headers['x-api-key'] = apiKey;
+
+  const res = await fetch(MTA_FEED_URL, { headers });
+  if (!res.ok) {
+    const text = await res.text().then(t => t.slice(0, 120));
+    throw new Error(`MTA feed ${res.status}: ${text}`);
+  }
+
+  const buffer = await res.arrayBuffer();
+  const feedMsg = FeedMessage.decode(new Uint8Array(buffer));
+
+  const arrivals = [];
+  for (const entity of feedMsg.entity || []) {
+    const tu = entity.tripUpdate;
+    if (!tu) continue;
+    const routeId = tu.trip?.routeId || '';
+    if (routeId !== 'Q') continue; // Q train only
+
+    const tripId = tu.trip?.tripId || entity.id || '';
+
+    for (const stu of tu.stopTimeUpdate || []) {
+      if (!MTA_Q72_STOPS.has(stu.stopId)) continue;
+
+      // GTFS-RT int64 times come as Long objects from protobufjs
+      const rawArr = stu.arrival?.time;
+      const rawDep = stu.departure?.time;
+      const rawTime = rawArr != null ? rawArr : rawDep;
+      if (rawTime == null) continue;
+
+      const timeSec = typeof rawTime === 'object' ? rawTime.toNumber() : Number(rawTime);
+      const delaySec = Number(
+        (stu.arrival?.delay != null ? stu.arrival.delay : stu.departure?.delay) ?? 0
+      );
+
+      arrivals.push({
+        tripId,
+        routeId,
+        stopId: stu.stopId,
+        predictedTimeMs: timeSec * 1000,
+        delaySec,
+      });
+    }
+  }
+  return arrivals;
+});
+
 ipcMain.on('log-delay', (_event, entry) => {
   // entry = { line, tripId, date, time, headsign, scheduled, actual, delayMin, isEarly }
   try {
     ensureLogDir();
-    const fileName = entry.line === 'red' ? 'delay_red.csv' : 'delay_green.csv';
+    const fileName = entry.line === 'red'      ? 'delay_red.csv'
+                   : entry.line === 'green'    ? 'delay_green.csv'
+                   :                             'delay_mta_q72.csv';
     const filePath = path.join(LOG_DIR, fileName);
 
     const rows = readCSV(filePath);
@@ -184,6 +253,23 @@ ipcMain.on('log-delay', (_event, entry) => {
   } catch (err) {
     console.error('[delay-log] Error writing CSV:', err);
   }
+});
+
+// ── Today's average delay reader ─────────────────────────────────────────────
+ipcMain.handle('get-today-avg-delays', () => {
+  ensureLogDir();
+  const today = new Date().toLocaleDateString('en-US');
+  const files = {
+    red:      'delay_red.csv',
+    green:    'delay_green.csv',
+    mta_q72:  'delay_mta_q72.csv',
+  };
+  const result = {};
+  for (const [line, fileName] of Object.entries(files)) {
+    const cells = readCSV(path.join(LOG_DIR, fileName)).get(today);
+    result[line] = (cells && cells[1] !== '') ? cells[1] : null;
+  }
+  return result;
 });
 
 // ── App lifecycle ────────────────────────────────────────────────────────────
