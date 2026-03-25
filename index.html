@@ -502,6 +502,79 @@
     margin-top: 2px;
   }
 
+  /* ── Today's Average Delay stats ───────────────────────── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  @media (max-width: 640px) {
+    .stats-grid { grid-template-columns: 1fr; }
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    padding: 24px 16px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 4px;
+  }
+
+  .stat-line-badge {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 6px;
+  }
+
+  .stat-label {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--text);
+  }
+
+  .stat-sublabel {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+
+  .stat-value {
+    font-family: var(--mono);
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    line-height: 1;
+    color: var(--text);
+  }
+
+  .stat-value.delay-good   { color: var(--green); }
+  .stat-value.delay-medium { color: var(--amber); }
+  .stat-value.delay-bad    { color: var(--red);   }
+
+  .stat-unit {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
   /* ── Electron frameless titlebar ──────────────────────── */
   body { padding-top: 36px; }   /* make room for titlebar */
 
@@ -682,6 +755,32 @@
     </div>
   </div>
 
+  <!-- Today's Average Delays -->
+  <div class="section-label" style="margin-top:32px">Today's Average Delay</div>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-line-badge" style="background:var(--red)">RL</div>
+      <div class="stat-label">Red Line</div>
+      <div class="stat-sublabel">Central Square</div>
+      <div class="stat-value" id="stat-red-avg">—</div>
+      <div class="stat-unit">avg delay today</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-line-badge" style="background:#00843D">GL</div>
+      <div class="stat-label">Green Line</div>
+      <div class="stat-sublabel">Park Street</div>
+      <div class="stat-value" id="stat-green-avg">—</div>
+      <div class="stat-unit">avg delay today</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-line-badge" style="background:#FCCC0A;color:#000">Q</div>
+      <div class="stat-label">Q Train</div>
+      <div class="stat-sublabel">72 St-2 Av</div>
+      <div class="stat-value" id="stat-mta-avg">—</div>
+      <div class="stat-unit">avg delay today</div>
+    </div>
+  </div>
+
   <div class="last-updated" id="last-updated"></div>
 </main>
 
@@ -692,6 +791,10 @@
   // Optional: paste a free MBTA API key here (1000 req/min vs 20 unauthenticated).
   // Get one at https://api-v3.mbta.com/
   const API_KEY = '';
+
+  // MTA API key — not required for the NQRW GTFS-RT feed (publicly accessible).
+  // Leave blank. If the MTA restricts access in the future, register free at https://api.mta.info/
+  const MTA_API_KEY = '';
 
   function apiUrl(path, params) {
     const q = Object.entries(params)
@@ -1016,14 +1119,100 @@
     });
   }
 
+  // ── MTA Q train (72 St-2 Av) ─────────────────────────────────────────────────
+  //
+  // Fetching is handled in the Electron main process (Node.js) because:
+  //   1. The MTA GTFS-RT feed is binary protobuf — parsed server-side.
+  //   2. Avoids CORS restrictions on binary feeds.
+  //
+  // Directions: Q05N = northbound (96 St / Astoria), Q05S = southbound (Coney Island)
+
+  async function fetchMtaQ72() {
+    if (!window.electronAPI?.fetchMtaPredictions) return null; // no-op in plain browser
+    return window.electronAPI.fetchMtaPredictions(MTA_API_KEY);
+  }
+
+  // Process MTA arrivals for logging only (no direction panel rendering)
+  function processMtaArrivals(arrivals) {
+    const now = Date.now();
+    const arriving = (arrivals || [])
+      .filter(a => Math.round((a.predictedTimeMs - now) / 60000) <= 0)
+      .map(a => ({
+        minutes:         Math.round((a.predictedTimeMs - now) / 60000),
+        tripId:          a.tripId,
+        predictedTimeMs: a.predictedTimeMs,
+        delaySec:        a.delaySec,
+        headsign:        a.stopId.endsWith('N') ? 'Uptown / 96 St' : 'Coney Island',
+      }));
+    if (arriving.length) logMtaDelays(arriving);
+  }
+
+  // ── Today's avg delay stats ───────────────────────────────────────────────
+  async function fetchAvgDelays() {
+    if (!window.electronAPI?.getTodayAvgDelays) return null;
+    return window.electronAPI.getTodayAvgDelays();
+  }
+
+  function renderAvgDelays(delays) {
+    if (!delays) return;
+    const ids = { red: 'stat-red-avg', green: 'stat-green-avg', mta_q72: 'stat-mta-avg' };
+    for (const [line, elId] of Object.entries(ids)) {
+      const el  = document.getElementById(elId);
+      const raw = delays[line];
+      if (raw == null) {
+        el.textContent = '—';
+        el.className = 'stat-value';
+      } else {
+        const val = parseFloat(raw);
+        el.textContent = val.toFixed(1) + ' min';
+        el.className = 'stat-value ' +
+          (val < 2 ? 'delay-good' : val < 5 ? 'delay-medium' : 'delay-bad');
+      }
+    }
+  }
+
+  const seenMtaTrips = new Set();
+
+  function logMtaDelays(arrivingTrains) {
+    if (!window.electronAPI?.logDelay) return;
+
+    const now  = new Date();
+    const date = now.toLocaleDateString('en-US');
+
+    arrivingTrains.forEach(t => {
+      const dedupKey = `${date}:${t.tripId}`;
+      if (seenMtaTrips.has(dedupKey)) return;
+      seenMtaTrips.add(dedupKey);
+
+      const delayMin     = Math.round(t.delaySec / 60);
+      const isEarly      = delayMin < 0;
+      const scheduledMs  = t.predictedTimeMs - (t.delaySec * 1000);
+      const toHHMM       = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+      window.electronAPI.logDelay({
+        line:      'mta_q72',
+        tripId:    t.tripId,
+        date,
+        time:      toHHMM(now),
+        headsign:  t.headsign,
+        scheduled: toHHMM(scheduledMs),
+        actual:    toHHMM(now),
+        delayMin,
+        isEarly,
+      });
+    });
+  }
+
   async function fetchAll() {
     setRefreshing(true);
 
     // Fetch predictions and alerts independently so one failure doesn't affect the other
-    const [predictionsResult, alertsResult, greenLineResult] = await Promise.allSettled([
+    const [predictionsResult, alertsResult, greenLineResult, mtaResult, avgDelaysResult] = await Promise.allSettled([
       fetchPredictions(),
       fetchAlerts(),
-      fetchGreenLine()
+      fetchGreenLine(),
+      fetchMtaQ72(),
+      fetchAvgDelays()
     ]);
 
     if (predictionsResult.status === 'fulfilled') {
@@ -1051,6 +1240,18 @@
       const glErr = '<div class="no-trains">NO PREDICTIONS AVAILABLE</div>';
       document.getElementById('green-outbound').innerHTML = glErr;
       document.getElementById('green-inbound').innerHTML  = glErr;
+    }
+
+    if (mtaResult.status === 'fulfilled' && mtaResult.value !== null) {
+      processMtaArrivals(mtaResult.value);
+    } else if (mtaResult.status === 'rejected') {
+      console.error('MTA Q72 fetch failed:', mtaResult.reason);
+    }
+
+    if (avgDelaysResult.status === 'fulfilled') {
+      renderAvgDelays(avgDelaysResult.value);
+    } else {
+      console.error('Avg delays read failed:', avgDelaysResult.reason);
     }
 
     const now = new Date();
